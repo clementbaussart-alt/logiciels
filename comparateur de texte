@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="fr">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Comparateur de textes – Ancien vs Récent</title>
+	<style>
+		:root{
+			--bg:#0b0c0f; --panel:#14161a; --muted:#8b93a6; --text:#e8ecf3;
+			--accent:#5b8cff; --focus:#ffd166;
+			--hl-ins: rgba(31,191,71,0.4);
+			--hl-ins-border: rgba(31,191,71,0.7);
+			--hl-del: rgba(255,92,92,0.35);
+			--hl-del-border: rgba(255,92,92,0.7);
+			--hl-focus: rgba(255,209,102,0.9); /* jaune focus */
+		}
+		html,body{
+			margin:0;padding:0;background:var(--bg);color:var(--text);
+			font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial
+		}
+		header{
+			padding:16px 20px;border-bottom:1px solid #23262d;background:var(--panel);
+			position:sticky;top:0;z-index:5
+		}
+		header h1{margin:0;font-size:16px}
+
+		/* Layout: barre latérale à droite */
+		main{display:grid;grid-template-columns:1fr 360px;min-height:calc(100vh - 58px)}
+		aside{border-left:1px solid #23262d;background:var(--panel);overflow:auto}
+		section{padding:16px;overflow:auto;position:relative}
+
+		.controls{display:grid;gap:12px;padding:12px;border:1px solid #23262d;background:var(--panel);border-radius:12px}
+		textarea{
+			width:100%;min-height:120px;resize:vertical;background:#0e1014;border:1px solid #2a2f39;
+			border-radius:8px;color:var(--text);padding:10px
+		}
+		label{font-weight:600;margin-bottom:6px;display:block}
+		button{
+			background:var(--accent);color:white;border:0;border-radius:8px;padding:10px 12px;font-weight:600;cursor:pointer
+		}
+		button.secondary{background:#2a2f39}
+		.split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+		.panel{background:var(--panel);border:1px solid #23262d;border-radius:12px;overflow:hidden}
+		.panel h2{margin:0;padding:12px 14px;border-bottom:1px solid #23262d;font-size:14px}
+		#diffOutput{
+			padding:14px;max-width:100%;
+			/* Conserver les sauts de ligne réels, tout en coupant les mots si nécessaire */
+			white-space: pre-wrap;
+			word-break: break-word;
+		}
+
+		/* Surlignage (texte blanc) dans le texte annoté */
+		mark.ins,
+		mark.del {
+			background: transparent;
+			box-shadow: inset 0 -0.45em var(--hl-ins);
+			border: 1px solid var(--hl-ins-border);
+			border-radius: 4px;
+			color: #fff;
+			padding: 0 2px;
+		}
+		mark.del{
+			box-shadow: inset 0 -0.45em var(--hl-del);
+			border-color: var(--hl-del-border);
+			text-decoration: line-through;
+			text-decoration-thickness: 2px;
+			text-decoration-color: rgba(255,92,92,0.9);
+		}
+		/* Focus jaune quand on clique depuis la barre latérale */
+		mark.focused{
+			box-shadow: inset 0 -0.48em var(--hl-focus), 0 0 0 2px rgba(255,209,102,0.25);
+			border-color: rgba(255,209,102,0.85);
+		}
+		/* Fantôme simple (ancien repère) */
+		.focus-ghost{
+			display:inline-block;
+			width: 10px; height: 1.2em; vertical-align: baseline;
+			box-shadow: inset 0 -0.48em var(--hl-focus), 0 0 0 2px rgba(255,209,102,0.25);
+			border: 1px dashed rgba(255,209,102,0.85);
+			border-radius: 4px;
+		}
+		/* Fantôme “contenu supprimé” réinséré (parenthèses + surlignage rouge) */
+		.del-ghost{
+			display:inline-block;
+			margin: 0 2px;
+			color:#fff;
+		}
+		.del-ghost mark.del{
+			text-decoration: none; /* pas de barré dans la réapparition */
+			box-shadow: inset 0 -0.45em var(--hl-del);
+			border-color: var(--hl-del-border);
+		}
+
+		.sidebar{display:grid;grid-template-rows:auto auto auto 1fr}
+		.summary{padding:12px;border-bottom:1px solid #23262d}
+		.summary small{color:var(--muted)}
+		.toolbar{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #23262d}
+		code.badge{background:#222630;border:1px solid #2a2f39;padding:2px 6px;border-radius:6px}
+		.changes{padding:8px;overflow:auto}
+		.change{
+			display:block;text-align:left;width:100%;background:transparent;border:1px solid #2a2f39;
+			border-radius:10px;color:var(--text);padding:10px;margin:8px 0;cursor:pointer
+		}
+		.change:hover{border-color:var(--focus)}
+		.change .type{font-weight:700;margin-bottom:6px;display:block}
+
+		/* Tokens barre latérale: texte blanc, pas de barré, surlignage ajusté au mot */
+		.change .token{
+			display:inline;
+			color:#fff;background:transparent;
+			box-shadow: inset 0 -0.35em var(--hl-ins);
+			border:1px solid var(--hl-ins-border);
+			border-radius:4px;
+			padding:0 1px;
+		}
+		.change .token.del{
+			box-shadow: inset 0 -0.35em var(--hl-del);
+			border-color: var(--hl-del-border);
+			text-decoration: none;
+		}
+		.change .ctx{color:var(--muted);display:block;margin-top:6px}
+
+		footer.note{padding:10px 14px;color:var(--muted);border-top:1px solid #23262d;font-size:12px}
+		a.link{color:var(--accent);text-decoration:none}
+
+		/* État sélectionné dans la barre latérale */
+		.change.selected{
+			border-color: var(--focus);
+			box-shadow: 0 0 0 2px rgba(255,209,102,0.25);
+		}
+		.change:focus-visible{
+			outline: 2px solid var(--focus);
+			outline-offset: 2px;
+		}
+
+		/* Bouton "Aller à la carte sélectionnée" (flottant) */
+		#backToSelected{
+			position: fixed;
+			right: 20px;
+			bottom: 20px;
+			z-index: 10;
+			background: var(--focus);
+			color: #111;
+			border: 0;
+			border-radius: 999px;
+			padding: 10px 14px;
+			font-weight: 800;
+			cursor: pointer;
+			box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+			display: none; /* masqué par défaut */
+		}
+		#backToSelected.visible{ display: inline-flex; }
+		#backToSelected:hover{ filter: brightness(0.95); }
+
+		@media (max-width:1000px){
+			main{grid-template-columns:1fr}
+			aside{order:2;border-left:0;border-top:1px solid #23262d}
+			#backToSelected{ right: 12px; bottom: 12px; }
+		}
+	</style>
+
+	<!-- JsDiff lazy + fallback simple -->
+	<script>
+	(function(){
+		var s=document.createElement('script');
+		s.src="https://cdn.jsdelivr.net/npm/diff@5.2.0/dist/diff.min.js"; /* jsdiff CDN */
+		s.onerror=function(){
+			window.Diff={diffWordsWithSpace:function(a,b){
+				if(a===b)return[{value:a}];
+				return[{removed:true,value:a},{added:true,value:b}]
+			}}
+		};
+		document.head.appendChild(s);
+	})();
+	</script>
+</head>
+<body>
+	<header>
+		<h1>Comparateur de textes • Ancien ↔ Récent</h1>
+	</header>
+
+	<main>
+		<section>
+			<div class="panel">
+				<h2>Texte récent annoté</h2>
+				<div id="diffOutput"></div>
+				<footer class="note">
+					Conseil: clique un élément de la barre latérale pour surligner le segment correspondant en jaune dans le texte.
+				</footer>
+			</div>
+
+			<div class="controls" style="margin-top:16px">
+				<div>
+					<label for="oldText">Texte ancien</label>
+					<textarea id="oldText" placeholder="Colle ici l'ancienne version…"></textarea>
+				</div>
+				<div>
+					<label for="newText">Texte récent</label>
+					<textarea id="newText" placeholder="Colle ici la nouvelle version…"></textarea>
+				</div>
+				<div class="split">
+					<button id="compareBtn">Comparer</button>
+					<button id="copyBtn" class="secondary" title="Copier le HTML annoté">Copier le résultat</button>
+				</div>
+			</div>
+		</section>
+
+		<!-- Barre latérale à droite -->
+		<aside class="sidebar">
+			<div class="summary">
+				<div style="display:flex;gap:8px;flex-wrap:wrap">
+					<code class="badge">Insertions: <span id="insCount">0</span></code>
+					<code class="badge">Suppressions: <span id="delCount">0</span></code>
+					<code class="badge">Remplacements: <span id="repCount">0</span></code>
+				</div>
+				<small id="hint">Colle tes textes puis clique sur « Comparer ».</small>
+			</div>
+			<div class="toolbar">
+				<strong>Changements</strong>
+				<span style="flex:1"></span>
+				<button id="toggleContext" class="secondary" title="Afficher un peu de contexte">± Contexte</button>
+			</div>
+			<div id="changesList" class="changes" aria-live="polite"></div>
+		</aside>
+
+		<!-- Bouton flottant pour aller à la carte sélectionnée de la barre latérale -->
+		<button id="backToSelected" title="Aller à la carte sélectionnée">⬅ Aller à la sélection</button>
+	</main>
+
+<script>
+(function(){
+	const $ = sel => document.querySelector(sel);
+
+	const oldTA = $("#oldText");
+	const newTA = $("#newText");
+	const out = $("#diffOutput");
+	const changesList = $("#changesList");
+	const insCount = $("#insCount");
+	const delCount = $("#delCount");
+	const repCount = $("#repCount");
+	const hint = $("#hint");
+	const copyBtn = $("#copyBtn");
+	const toggleContextBtn = $("#toggleContext");
+	const backBtn = $("#backToSelected");
+
+	let showContext = false;
+	let lastFocusedId = null;
+	let lastFocusedType = null;
+	let lastSelectedBtn = null; // bouton sélectionné en sidebar
+
+	function escapeHtml(s){
+		return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+	}
+	// Normaliser espaces/tabulations à l’intérieur des lignes (préserve \n)
+	function normalizeSpaces(s){
+		return s.replace(/[ \t]+/g, ' ');
+	}
+	function emojiFor(t){
+		if (t==='insertion') return '➕';
+		if (t==='suppression') return '➖';
+		return '♻️';
+	}
+	function cap(s){return s.charAt(0).toUpperCase()+s.slice(1);}
+
+	function isOnlySpaces(s){ return !s || /^\s+$/.test(s); }
+	function isWhitespaceOnlyChange(removed, added){
+		const r = (removed||"").replace(/\s+/g,'');
+		const a = (added||"").replace(/\s+/g,'');
+		return r === a && (removed!==added);
+	}
+
+	function updateBackButton(){
+		// Visible uniquement s'il y a une carte sélectionnée en sidebar
+		if (lastSelectedBtn){
+			backBtn.classList.add('visible');
+			backBtn.disabled = false;
+		}else{
+			backBtn.classList.remove('visible');
+			backBtn.disabled = true;
+		}
+	}
+
+	function clearFocus(){
+		// Retire focus visuel sur le texte central
+		if (lastFocusedId){
+			const prev = document.getElementById(lastFocusedId);
+			if (prev && prev.classList) prev.classList.remove('focused');
+			// Retire éventuel ghost
+			const ghost = document.getElementById(lastFocusedId + '-ghost');
+			if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+			// Retire éventuel del-ghost
+			const delGhost = document.getElementById(lastFocusedId + '-delghost');
+			if (delGhost && delGhost.parentNode) delGhost.parentNode.removeChild(delGhost);
+		}
+		lastFocusedId = null;
+		lastFocusedType = null;
+	}
+
+	// Affiche un del-ghost: (texte supprimé) surligné en rouge et persistant
+	function showDeletionGhostAfter(anchorEl, id, removedText){
+		// Retire un éventuel del-ghost précédent pour cet id
+		const old = document.getElementById(id + '-delghost');
+		if (old && old.parentNode) old.parentNode.removeChild(old);
+
+		const ghost = document.createElement('span');
+		ghost.id = id + '-delghost';
+		ghost.className = 'del-ghost';
+		const content = '(' + removedText + ')';
+		ghost.innerHTML = `<mark class="del">${escapeHtml(content)}</mark>`;
+		anchorEl.insertAdjacentElement('afterend', ghost);
+	}
+
+	function focusChange(id, type, options){
+		// options: { removedText?: string }
+		clearFocus();
+		const el = document.getElementById(id);
+		if (!el) return;
+
+		if (el.tagName === 'MARK'){
+			el.classList.add('focused');
+			lastFocusedId = id;
+			lastFocusedType = type || null;
+		} else {
+			// C'est une ancre invisible (suppression pure)
+			lastFocusedId = id;
+			lastFocusedType = type || 'suppression';
+
+			// Si suppression pure ET removedText fourni -> montrer (…texte…) en rouge PERSISTANT
+			if ((type === 'suppression') && options && options.removedText){
+				showDeletionGhostAfter(el, id, options.removedText);
+			}else{
+				// Fallback: petit repère visuel (ghost focus)
+				let ghost = document.getElementById(id + '-ghost');
+				if (!ghost){
+					ghost = document.createElement('span');
+					ghost.id = id + '-ghost';
+					ghost.className = 'focus-ghost';
+					el.insertAdjacentElement('afterend', ghost);
+				}
+			}
+		}
+
+		(el.tagName === 'MARK' ? el : document.getElementById(id)).scrollIntoView({behavior:'smooth', block:'center'});
+		// L’affichage du bouton dépend de la sélection sidebar
+	}
+
+	function compute(){
+		const oldTxt = oldTA.value || "";
+		const newTxt = newTA.value || "";
+
+		const parts = (window.Diff && Diff.diffWordsWithSpace)
+			? Diff.diffWordsWithSpace(oldTxt, newTxt)
+			: [{removed:true,value:oldTxt},{added:true,value:newTxt}];
+
+		let html = "";
+		let changes = [];
+		let ins=0, del=0, rep=0, idxChange=0;
+
+		// Fusion suppression+insertion -> remplacement
+		for (let i=0;i<parts.length;i++){
+			const p = parts[i];
+
+			// Ignorer segments vides / espaces purs
+			if ((p.added || p.removed) && isOnlySpaces(p.value)) continue;
+
+			// Cas remplacement: removed suivi d'un added (et pas uniquement des espaces)
+			if (p.removed && !p.added){
+				const next = parts[i+1];
+				if (next && next.added && !next.removed) {
+					if (!isOnlySpaces(next.value) && !isWhitespaceOnlyChange(p.value, next.value)) {
+						const anchorId = `chg-${++idxChange}`;
+						html += `<mark class="ins" id="${anchorId}">${escapeHtml(normalizeSpaces(next.value))}</mark>`;
+						rep++;
+						changes.push({
+							id: anchorId,
+							type: 'remplacement',
+							added: next.value,
+							removed: p.value
+						});
+						i++;
+						continue;
+					} else {
+						i++;
+						continue;
+					}
+				}
+				// Suppression pure
+				const anchorId = `chg-${++idxChange}`;
+				html += `<a id="${anchorId}"></a>`;
+				del++;
+				changes.push({
+					id: anchorId,
+					type: 'suppression',
+					added: '',
+					removed: p.value
+				});
+				continue;
+			}
+
+			// Ajout non consommé par un remplacement
+			if (p.added && !p.removed){
+				if (isOnlySpaces(p.value)) continue;
+				const anchorId = `chg-${++idxChange}`;
+				html += `<mark class="ins" id="${anchorId}">${escapeHtml(normalizeSpaces(p.value))}</mark>`;
+				ins++;
+				changes.push({
+					id: anchorId,
+					type: 'insertion',
+					added: p.value,
+					removed: ''
+				});
+				continue;
+			}
+
+			// Segment commun
+			html += escapeHtml(normalizeSpaces(p.value));
+		}
+
+		out.innerHTML = html;
+		renderChangesList(changes);
+		insCount.textContent = ins;
+		delCount.textContent = del;
+		repCount.textContent = rep;
+		hint.textContent = `${ins+del+rep} modifications détectées${rep? " • remplacements: "+rep : ""}.`;
+	}
+
+	function flashSidebarCard(btn){
+		const prevShadow = btn.style.boxShadow;
+		btn.style.boxShadow = '0 0 0 3px rgba(255,209,102,0.45)';
+		setTimeout(()=>{ btn.style.boxShadow = prevShadow; }, 750);
+	}
+
+	function renderChangesList(changes){
+		changesList.innerHTML = "";
+
+		// Filtrage sécurité
+		const filtered = changes.filter(c => {
+			if (c.type === 'remplacement') return !isWhitespaceOnlyChange(c.removed, c.added);
+			if (c.type === 'insertion') return !isOnlySpaces(c.added);
+			if (c.type === 'suppression') return !isOnlySpaces(c.removed);
+			return true;
+		});
+
+		if (!filtered.length){
+			changesList.innerHTML = `<div style="color:var(--muted);padding:8px">Aucun changement.</div>`;
+			updateBackButton();
+			return;
+		}
+
+		const ctxSpan = showContext ? 24 : 0;
+		let toRestoreId = (lastSelectedBtn && lastSelectedBtn.dataset.id) ? lastSelectedBtn.dataset.id : null;
+
+		lastSelectedBtn = null; // les boutons sont recréés; re-restauration plus bas
+
+		for (const c of filtered){
+			const btn = document.createElement('button');
+			btn.className = 'change';
+			btn.type = 'button';
+			btn.dataset.id = c.id;
+			btn.dataset.type = c.type;
+			// stocker le texte supprimé pour pouvoir le réafficher dans le texte central
+			if (c.type === 'suppression'){
+				btn.dataset.removed = c.removed;
+			}
+
+			let tokenHtml = '';
+			if (c.type === 'insertion'){
+				tokenHtml = `<mark class="ins token">${escapeHtml(c.added)}</mark>`;
+			}else if (c.type === 'suppression'){
+				tokenHtml = `<mark class="del token">${escapeHtml(c.removed)}</mark>`;
+			}else{ // remplacement
+				tokenHtml = `
+					<mark class="del token">${escapeHtml(c.removed)}</mark>
+					<span style="display:inline-block;width:6px"></span>
+					<mark class="ins token">${escapeHtml(c.added)}</mark>
+				`;
+			}
+
+			let ctx = '';
+			if (ctxSpan > 0){
+				const src = c.type==='suppression' ? (oldTA.value||"") : (newTA.value||"");
+				const needle = (c.type==='suppression') ? c.removed : c.added;
+				const flat = (needle||"").replace(/\s+/g,' ').trim();
+				const pos = flat ? src.indexOf(flat) : -1;
+				if (pos>=0){
+					const start = Math.max(0,pos-ctxSpan);
+					const end = Math.min(src.length, pos+flat.length+ctxSpan);
+					ctx = (start>0?'…':'') + src.slice(start,end).replace(/\s+/g,' ') + (end<src.length?'…':'');
+				}
+			}
+
+			btn.innerHTML = `
+				<span class="type">${emojiFor(c.type)} ${cap(c.type)}</span>
+				${tokenHtml}
+				${ctx ? `<span class="ctx">${escapeHtml(ctx)}</span>` : ``}
+			`;
+
+			btn.addEventListener('click', () => {
+				// Sélection visuelle en sidebar
+				const prev = document.querySelector('.change.selected');
+				if (prev) prev.classList.remove('selected');
+				btn.classList.add('selected');
+				lastSelectedBtn = btn;
+
+				// Focus jaune dans le texte central
+				const opts = (btn.dataset.type === 'suppression')
+					? { removedText: btn.dataset.removed || '' }
+					: undefined;
+				focusChange(btn.dataset.id, btn.dataset.type, opts);
+				updateBackButton();
+			});
+
+			changesList.appendChild(btn);
+
+			// Restaurer la sélection précédente si possible
+			if (toRestoreId && c.id === toRestoreId){
+				btn.classList.add('selected');
+				lastSelectedBtn = btn;
+			}
+		}
+
+		updateBackButton();
+	}
+
+	// Actions
+	document.getElementById("compareBtn").addEventListener('click', () => {
+		// Nettoyage sélection sidebar et focus texte
+		if (lastSelectedBtn) { lastSelectedBtn.classList.remove('selected'); lastSelectedBtn = null; }
+		clearFocus();
+		compute();
+		updateBackButton();
+	});
+	document.getElementById("toggleContext").addEventListener('click', ()=>{
+		showContext = !showContext;
+		document.getElementById("toggleContext").textContent = showContext ? "Contexte —" : "± Contexte";
+		const prevSelectedId = lastSelectedBtn ? lastSelectedBtn.dataset.id : null;
+		const prevFocused = lastFocusedId;
+		compute();
+		// Restaurer la sélection si possible
+		if (prevSelectedId){
+			const candidate = Array.from(document.querySelectorAll('.change')).find(b => b.dataset.id === prevSelectedId);
+			if (candidate){
+				candidate.classList.add('selected');
+				lastSelectedBtn = candidate;
+			}else{
+				lastSelectedBtn = null;
+			}
+		}
+		// Restaurer le focus si l'élément existe encore
+		if (prevFocused){
+			const el = document.getElementById(prevFocused);
+			if (el && el.tagName === 'MARK'){
+				el.classList.add('focused');
+				lastFocusedId = prevFocused;
+			}else{
+				lastFocusedId = null;
+				lastFocusedType = null;
+			}
+		}
+		updateBackButton();
+	});
+	document.getElementById("copyBtn").addEventListener('click', async () => {
+		try{
+			await navigator.clipboard.writeText(out.innerHTML);
+			copyBtn.textContent = 'Copié ✓';
+			setTimeout(()=>copyBtn.textContent='Copier le résultat', 900);
+		}catch(e){
+			alert("Impossible de copier. Sélectionne et copie manuellement.");
+		}
+	});
+
+	// Bouton "Aller à la carte sélectionnée" (scroll la barre latérale jusqu'à la sélection)
+	backBtn.addEventListener('click', () => {
+		if (!lastSelectedBtn) return;
+		lastSelectedBtn.scrollIntoView({behavior:'smooth', block:'center'});
+		flashSidebarCard(lastSelectedBtn);
+	});
+
+	/* Exemples rapides */
+	oldTA.value = "Le contrat entre en vigueur le 1er janvier 2024.\nLe prix est de 100€.\nLe client accepte les conditions.";
+	newTA.value = "Le contrat prend effet le 1er janvier 2025.\nLe prix est de 120 €.\nLe client accepte pleinement les conditions générales.";
+})();
+</script>
+</body>
+</html>
